@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOID-LAB | Campaign Mode</title>
+    <style>
+        /* --- ORIGINAL STYLING PRESERVED --- */
+        body { margin: 0; overflow: hidden; background: #d0d8e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 30px;
+            box-sizing: border-box;
+            color: #1a2a3a;
+        }
+
+        .hud-top { display: flex; justify-content: space-between; align-items: flex-start; }
+        .hud-bottom { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.9);
+            border-left: 4px solid #0077ff;
+            padding: 12px 24px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            min-width: 100px;
+        }
+
+        .label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.7; margin-bottom: 4px; }
+        .value { font-size: 26px; font-weight: bold; font-family: 'Courier New', Courier, monospace; }
+
+        #powerup-bar {
+            width: 200px;
+            height: 6px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            display: none;
+        }
+        #powerup-progress { height: 100%; width: 100%; transition: width 0.1s linear; }
+
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100; transition: opacity 0.5s; pointer-events: all;
+        }
+        #overlay.hidden { opacity: 0; pointer-events: none; }
+
+        h1 { font-size: 56px; letter-spacing: 18px; margin: 0; color: #1a2a3a; text-transform: uppercase; text-align: center; }
+        p { font-size: 14px; letter-spacing: 2px; color: #556677; margin: 25px 0 45px; text-align: center; line-height: 1.8; max-width: 500px; }
+
+        .btn-group { display: flex; gap: 20px; }
+        .btn {
+            background: #1a2a3a; border: none; color: #fff;
+            padding: 18px 45px; font-size: 14px; letter-spacing: 4px;
+            cursor: pointer; transition: all 0.3s; text-transform: uppercase;
+        }
+        .btn:hover { background: #0077ff; transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0, 119, 255, 0.3); }
+        .btn.secondary { background: #556677; }
+
+        .alert-box {
+            color: #ff3333; border-left-color: #ff3333;
+            animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
+
+        #checkpoint-msg {
+            position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 255, 136, 0.9); color: #000;
+            padding: 10px 30px; border-radius: 50px; font-weight: bold;
+            opacity: 0; transition: opacity 0.3s; letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="hud-top">
+            <div class="stat-box">
+                <div class="label">Sector Level</div>
+                <div id="level-val" class="value">01 / 03</div>
+            </div>
+            <div class="stat-box" style="border-left-color: #ffd700;">
+                <div class="label">Credits</div>
+                <div id="score-val" class="value">0000</div>
+            </div>
+            <div id="detection-warning" class="stat-box alert-box" style="visibility: hidden;">
+                <div class="label">System Integrity</div>
+                <div class="value">DETECTED</div>
+            </div>
+        </div>
+
+        <div class="hud-bottom">
+            <div id="powerup-info" style="font-weight: bold; font-size: 12px; color: #0077ff; display: none;">SPEED BOOST ACTIVE</div>
+            <div id="powerup-bar"><div id="powerup-progress"></div></div>
+            <div style="opacity: 0.8; font-size: 11px; letter-spacing: 1px; font-weight: bold;">
+                WASD: MOVE | SURVIVE 3 SECTORS | REACH THE EXIT
+            </div>
+        </div>
+    </div>
+
+    <div id="checkpoint-msg">CHECKPOINT REGISTERED</div>
+
+    <div id="overlay">
+        <h1 id="overlay-title">VOID-LAB</h1>
+        <p id="overlay-desc">INFILTRATE 3 SECURITY SECTORS.<br>MAPS EVOLVE. DIFFICULTY INCREASES.<br>COLLECT CREDITS AND ESCAPE.</p>
+        <div class="btn-group">
+            <button id="start-btn" class="btn">Begin Mission</button>
+            <button id="respawn-btn" class="btn secondary" style="display: none;">Respawn @ Checkpoint</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        /**
+         * VOID-LAB: 3-Stage Campaign
+         * for base engine
+         */
+
+        const CONFIG = {
+            playerBaseSpeed: 0.12,
+            playerSpeed: 0.12,
+            rotationSmoothing: 0.2,
+            baseEnemySpeed: 0.05,
+            powerupDuration: 10000,
+            levelScaling: {
+                enemySpeed: 0.005,
+                visionRange: 1.0
+            },
+            playerRadius: 0.35,
+            enemyRadius: 0.5,
+            mapWidth: 100,
+            mapDepth: 100,
+            cameraHeight: 18,
+            cameraOffsetZ: 10
+        };
+
+        let gameState = {
+            level: 1,
+            maxLevels: 3, // New max level cap
+            score: 0,
+            isStarted: false,
+            isGameOver: false,
+            detected: false,
+            keys: {},
+            enemies: [],
+            walls: [],
+            collectibles: [],
+            checkpoints: [],
+            // Starting position for Level 1
+            lastCheckpointPos: new THREE.Vector3(-45, 0.2, 45),
+            exitPos: new THREE.Vector3(45, 0, -45),
+            activePowerup: null,
+            powerupTimer: 0
+        };
+
+        let scene, camera, renderer, clock;
+        let player;
+        let audioCtx, ambientHum;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xd0d8e0);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(gameState.lastCheckpointPos.x, CONFIG.cameraHeight, gameState.lastCheckpointPos.z + CONFIG.cameraOffsetZ);
+            camera.lookAt(gameState.lastCheckpointPos.x, 0, gameState.lastCheckpointPos.z);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('keydown', (e) => gameState.keys[e.code] = true);
+            window.addEventListener('keyup', (e) => gameState.keys[e.code] = false);
+
+            document.getElementById('start-btn').addEventListener('click', startGame);
+            document.getElementById('respawn-btn').addEventListener('click', respawnFromCheckpoint);
+
+            setupLighting();
+            createLevel();
+        }
+
+        function startGame() {
+            if (!audioCtx) initAudio();
+            
+            // Check if this is a restart from Victory screen
+            if (document.getElementById('start-btn').innerText === "Reboot System") {
+                location.reload();
+                return;
+            }
+
+            gameState.isStarted = true;
+            gameState.isGameOver = false;
+            document.getElementById('overlay').classList.add('hidden');
+            document.getElementById('respawn-btn').style.display = 'none';
+        }
+
+        function respawnFromCheckpoint() {
+            player.position.copy(gameState.lastCheckpointPos);
+            gameState.isGameOver = false;
+            gameState.isStarted = true;
+            gameState.detected = false;
+            document.getElementById('overlay').classList.add('hidden');
+            document.getElementById('respawn-btn').style.display = 'none';
+            gameState.enemies.forEach(e => e.state = 'patrol');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function initAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            ambientHum = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            ambientHum.type = 'triangle';
+            ambientHum.frequency.setValueAtTime(50, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.015, audioCtx.currentTime);
+            ambientHum.connect(gain);
+            gain.connect(audioCtx.destination);
+            ambientHum.start();
+        }
+
+        function playCollectSound(type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.frequency.setValueAtTime(type === 'coin' ? 880 : 440, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(type === 'coin' ? 1760 : 880, audioCtx.currentTime + 0.1);
+            g.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+            osc.connect(g);
+            g.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        }
+
+        function setupLighting() {
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.4);
+            sun.position.set(30, 50, 20);
+            sun.castShadow = true;
+            sun.shadow.camera.left = -60;
+            sun.shadow.camera.right = 60;
+            sun.shadow.camera.top = 60;
+            sun.shadow.camera.bottom = -60;
+            sun.shadow.mapSize.width = 2048;
+            sun.shadow.mapSize.height = 2048;
+            scene.add(sun);
+        }
+
+        function createLevel() {
+            // Cleanup previous level
+            gameState.enemies.forEach(e => scene.remove(e.mesh));
+            gameState.walls.forEach(w => scene.remove(w));
+            gameState.collectibles.forEach(c => scene.remove(c.mesh));
+            gameState.checkpoints.forEach(cp => scene.remove(cp.mesh));
+            gameState.enemies = []; gameState.walls = []; gameState.collectibles = []; gameState.checkpoints = [];
+
+            // Reset checkpoints for new level (Start at Top Left, End at Bottom Right)
+            gameState.lastCheckpointPos.set(-45, 0.2, 45); 
+            
+            // Floor (Static)
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(120, 120),
+                new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.6 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor); // Note: We keep adding floors, practically harmless but could be optimized
+
+            // Generate Map based on CURRENT LEVEL
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x8899aa });
+            const layout = generateLargeMap();
+            
+            layout.forEach(w => {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(w.w, 3, w.d), wallMat);
+                wall.position.set(w.x, 1.5, w.z);
+                wall.castShadow = true; wall.receiveShadow = true;
+                scene.add(wall);
+                gameState.walls.push(wall);
+            });
+
+            // Player Setup
+            if (!player) {
+                player = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.8), new THREE.MeshStandardMaterial({ color: 0x0077ff }));
+                player.castShadow = true;
+                scene.add(player);
+                const pLight = new THREE.PointLight(0x0077ff, 0.6, 5);
+                player.add(pLight);
+            }
+            player.position.copy(gameState.lastCheckpointPos);
+
+            // Exit Setup
+            const exit = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 0.1, 3),
+                new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff88, emissiveIntensity: 0.6 })
+            );
+            exit.position.copy(gameState.exitPos);
+            scene.add(exit);
+            gameState.walls.push(exit);
+
+            // Add intermediate checkpoints
+            addCheckpoint(-20, 20);
+            addCheckpoint(0, 0);
+            addCheckpoint(20, -20);
+
+            scatterCollectibles();
+
+            // DIFFICULTY SCALING: More enemies per level
+            const enemyCount = 6 + (gameState.level * 5); // Lv1=11, Lv2=16, Lv3=21
+            for(let i=0; i<enemyCount; i++) spawnEnemy();
+            
+            // Update UI
+            document.getElementById('level-val').innerText = `0${gameState.level} / 03`;
+        }
+
+        // --- NEW MAP GENERATION LOGIC ---
+        function generateLargeMap() {
+            const walls = [
+                // Outer Bounds
+                { x: 0, z: -55, w: 110, d: 2 },
+                { x: 0, z: 55, w: 110, d: 2 },
+                { x: -55, z: 0, w: 2, d: 110 },
+                { x: 55, z: 0, w: 2, d: 110 }
+            ];
+
+            // LEVEL 1: SCATTERED (Training)
+            if (gameState.level === 1) {
+                for(let r=-2; r<=2; r++) {
+                    for(let c=-2; c<=2; c++) {
+                        if (r === 0 && c === 0) continue; 
+                        const x = c * 20;
+                        const z = r * 20;
+                        if (Math.random() > 0.4) walls.push({ x: x+5, z: z, w: 1, d: 12 });
+                        if (Math.random() > 0.4) walls.push({ x: x, z: z-5, w: 12, d: 1 });
+                    }
+                }
+            } 
+            
+            // LEVEL 2: THE GRID (Long corridors)
+            else if (gameState.level === 2) {
+                for(let i = -40; i <= 40; i += 20) {
+                    if (i !== 0) {
+                        if (Math.random() > 0.2) walls.push({ x: i, z: -25, w: 2, d: 45 });
+                        if (Math.random() > 0.2) walls.push({ x: i, z: 25, w: 2, d: 45 });
+                    }
+                    if (Math.random() > 0.5) walls.push({ x: 0, z: i + 10, w: 30, d: 1 });
+                }
+            }
+
+            // LEVEL 3: CHAOS (Dense blocks)
+            else {
+                for(let x = -50; x < 50; x += 10) {
+                    for(let z = -50; z < 50; z += 10) {
+                        if (Math.abs(x) < 15 && Math.abs(z) < 15) continue; // Spawn safe zone
+                        if (Math.abs(x - 45) < 10 && Math.abs(z + 45) < 10) continue; // Exit safe zone
+                        
+                        if (Math.random() > 0.55) {
+                            walls.push({ x: x, z: z, w: 8, d: 8 });
+                        }
+                    }
+                }
+            }
+
+            // Center dividers
+            walls.push({ x: 0, z: 15, w: 40, d: 2 });
+            walls.push({ x: 0, z: -15, w: 40, d: 2 });
+
+            return walls;
+        }
+
+        function addCheckpoint(x, z) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 0.05, 3),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 })
+            );
+            mesh.position.set(x, 0.02, z);
+            scene.add(mesh);
+            gameState.checkpoints.push({ mesh, x, z, active: false });
+        }
+
+        function scatterCollectibles() {
+            for(let i=0; i<45; i++) {
+                spawnCollectible('coin', (Math.random()-0.5)*100, (Math.random()-0.5)*100);
+            }
+            for(let i=0; i<5; i++) {
+                spawnCollectible('speed', (Math.random()-0.5)*95, (Math.random()-0.5)*95);
+                spawnCollectible('slow', (Math.random()-0.5)*95, (Math.random()-0.5)*95);
+            }
+        }
+
+        function spawnCollectible(type, x, z) {
+            let geo, mat;
+            if (type === 'coin') {
+                geo = new THREE.OctahedronGeometry(0.35);
+                mat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8 });
+            } else if (type === 'speed') {
+                geo = new THREE.SphereGeometry(0.45);
+                mat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff });
+            } else {
+                geo = new THREE.SphereGeometry(0.45);
+                mat = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0xff00ff });
+            }
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, 0.5, z);
+            if (checkCollision(mesh.position, 1.0)) {
+                mesh.position.x += 2; // Simple shift if stuck in wall
+            }
+            scene.add(mesh);
+            gameState.collectibles.push({ mesh, type });
+        }
+
+        function spawnEnemy() {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshStandardMaterial({ color: 0xff3333 }));
+            mesh.position.set((Math.random()-0.5)*95, 0.35, (Math.random()-0.5)*95);
+            
+            // Ensure enemies don't spawn exactly on player
+            if(mesh.position.distanceTo(gameState.lastCheckpointPos) < 10) mesh.position.x += 20;
+
+            mesh.castShadow = true;
+            scene.add(mesh);
+
+            const cone = new THREE.Mesh(
+                new THREE.ConeGeometry(2.5, 9, 32),
+                new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.15 })
+            );
+            cone.rotation.x = Math.PI/2; cone.position.set(0, 0, 4.5);
+            mesh.add(cone);
+
+            gameState.enemies.push({
+                mesh: mesh, state: 'patrol',
+                patrolTarget: new THREE.Vector3((Math.random()-0.5)*100, 0, (Math.random()-0.5)*100),
+                speed: CONFIG.baseEnemySpeed + (gameState.level * CONFIG.levelScaling.enemySpeed),
+                visionRange: 8.5 + (gameState.level * CONFIG.levelScaling.visionRange),
+            });
+        }
+
+        function checkCollision(pos, radius) {
+            for(let wall of gameState.walls) {
+                const box = new THREE.Box3().setFromObject(wall);
+                const closestPoint = new THREE.Vector3().copy(pos).clamp(box.min, box.max);
+                if (pos.distanceTo(closestPoint) < radius) return true;
+            }
+            return false;
+        }
+
+        function updatePowerups(delta) {
+            if (gameState.activePowerup) {
+                gameState.powerupTimer -= delta * 1000;
+                const bar = document.getElementById('powerup-bar');
+                const progress = document.getElementById('powerup-progress');
+                const info = document.getElementById('powerup-info');
+                
+                bar.style.display = 'block';
+                info.style.display = 'block';
+                progress.style.width = (gameState.powerupTimer / CONFIG.powerupDuration * 100) + '%';
+                progress.style.background = gameState.activePowerup === 'speed' ? '#00ffff' : '#ff00ff';
+                info.innerText = gameState.activePowerup === 'speed' ? 'SPEED OVERDRIVE' : 'CHRONO DAMPENER';
+
+                if (gameState.powerupTimer <= 0) {
+                    gameState.activePowerup = null;
+                    CONFIG.playerSpeed = CONFIG.playerBaseSpeed;
+                    bar.style.display = 'none';
+                    info.style.display = 'none';
+                }
+            }
+        }
+
+        function update(delta) {
+            if (!gameState.isStarted || gameState.isGameOver) return;
+
+            updatePowerups(delta);
+
+            const move = new THREE.Vector3();
+            if (gameState.keys['KeyW'] || gameState.keys['ArrowUp']) move.z -= 1;
+            if (gameState.keys['KeyS'] || gameState.keys['ArrowDown']) move.z += 1;
+            if (gameState.keys['KeyA'] || gameState.keys['ArrowLeft']) move.x -= 1;
+            if (gameState.keys['KeyD'] || gameState.keys['ArrowRight']) move.x += 1;
+
+            if (move.length() > 0) {
+                move.normalize().multiplyScalar(CONFIG.playerSpeed);
+                const nextPos = player.position.clone().add(move);
+                if (!checkCollision(nextPos, CONFIG.playerRadius)) {
+                    player.position.copy(nextPos);
+                }
+                player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, Math.atan2(move.x, move.z), CONFIG.rotationSmoothing);
+            }
+
+            const targetCamPos = new THREE.Vector3(player.position.x, CONFIG.cameraHeight, player.position.z + CONFIG.cameraOffsetZ);
+            camera.position.lerp(targetCamPos, 0.08);
+            camera.lookAt(player.position.x, 0, player.position.z);
+
+            // Collectibles
+            gameState.collectibles.forEach((c, idx) => {
+                c.mesh.rotation.y += delta * 2;
+                if (player.position.distanceTo(c.mesh.position) < 1.2) {
+                    if (c.type === 'coin') {
+                        gameState.score += 100;
+                        document.getElementById('score-val').innerText = gameState.score.toString().padStart(4, '0');
+                        playCollectSound('coin');
+                    } else {
+                        gameState.activePowerup = c.type;
+                        gameState.powerupTimer = CONFIG.powerupDuration;
+                        CONFIG.playerSpeed = c.type === 'speed' ? CONFIG.playerBaseSpeed * 1.8 : CONFIG.playerBaseSpeed;
+                        playCollectSound('power');
+                    }
+                    scene.remove(c.mesh);
+                    gameState.collectibles.splice(idx, 1);
+                }
+            });
+
+            // Checkpoints
+            gameState.checkpoints.forEach(cp => {
+                if (player.position.distanceTo(cp.mesh.position) < 2.0 && !cp.active) {
+                    cp.active = true;
+                    cp.mesh.material.opacity = 0.8;
+                    cp.mesh.material.color.set(0x00ff88);
+                    gameState.lastCheckpointPos.copy(cp.mesh.position);
+                    showCheckpointMsg();
+                }
+            });
+
+            // Enemies
+            let detectionCount = 0;
+            const enemySpeedMult = (gameState.activePowerup === 'slow') ? 0.35 : 1.0;
+
+            gameState.enemies.forEach(enemy => {
+                const distToPlayer = enemy.mesh.position.distanceTo(player.position);
+                const dirToPlayer = player.position.clone().sub(enemy.mesh.position).normalize();
+                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(enemy.mesh.quaternion);
+                
+                let canSee = false;
+                if (distToPlayer < enemy.visionRange && forward.angleTo(dirToPlayer) < Math.PI / 3.0) {
+                    const ray = new THREE.Raycaster(enemy.mesh.position, dirToPlayer, 0, enemy.visionRange);
+                    const hit = ray.intersectObjects(gameState.walls);
+                    if (hit.length === 0 || hit[0].distance > distToPlayer) canSee = true;
+                }
+
+                if (canSee) {
+                    enemy.state = 'chase';
+                    detectionCount++;
+                    enemy.mesh.position.add(dirToPlayer.multiplyScalar(enemy.speed * 1.45 * enemySpeedMult));
+                    enemy.mesh.lookAt(player.position.x, 0.35, player.position.z);
+                } else {
+                    const distToTarget = enemy.mesh.position.distanceTo(enemy.patrolTarget);
+                    if (distToTarget < 2) enemy.patrolTarget.set((Math.random()-0.5)*105, 0, (Math.random()-0.5)*105);
+                    const dirToTarget = enemy.patrolTarget.clone().sub(enemy.mesh.position).normalize();
+                    const nextE = enemy.mesh.position.clone().add(dirToTarget.clone().multiplyScalar(enemy.speed * enemySpeedMult));
+                    if (!checkCollision(nextE, CONFIG.enemyRadius)) {
+                        enemy.mesh.position.copy(nextE);
+                        enemy.mesh.rotation.y = THREE.MathUtils.lerp(enemy.mesh.rotation.y, Math.atan2(dirToTarget.x, dirToTarget.z), 0.05);
+                    } else {
+                        enemy.patrolTarget.set((Math.random()-0.5)*105, 0, (Math.random()-0.5)*105);
+                    }
+                }
+
+                if (distToPlayer < 0.8) gameOver("INFILTRATION COMPROMISED");
+            });
+
+            gameState.detected = detectionCount > 0;
+            document.getElementById('detection-warning').style.visibility = gameState.detected ? 'visible' : 'hidden';
+
+            if (player.position.distanceTo(gameState.exitPos) < 2.5) levelUp();
+        }
+
+        function showCheckpointMsg() {
+            const msg = document.getElementById('checkpoint-msg');
+            msg.style.opacity = '1';
+            setTimeout(() => msg.style.opacity = '0', 2500);
+        }
+
+        // --- NEW LEVEL UP LOGIC ---
+        function levelUp() {
+            if (gameState.level >= gameState.maxLevels) {
+                gameVictory();
+            } else {
+                gameState.level++;
+                createLevel();
+            }
+        }
+
+        function gameVictory() {
+            gameState.isGameOver = true;
+            gameState.isStarted = false;
+            document.getElementById('overlay').classList.remove('hidden');
+            const title = document.getElementById('overlay-title');
+            title.innerText = "MISSION COMPLETE";
+            title.style.color = "#00ff88"; 
+            document.getElementById('overlay-desc').innerHTML = `ALL 3 SECTORS SECURED.<br>TOTAL CREDITS: ${gameState.score}<br>SYSTEM INTEGRITY RESTORED.`;
+            const btn = document.getElementById('start-btn');
+            btn.innerText = "Reboot System";
+            btn.onclick = () => location.reload(); // Hard reload to reset everything
+            document.getElementById('respawn-btn').style.display = 'none';
+        }
+
+        function gameOver(reason) {
+            gameState.isGameOver = true;
+            gameState.isStarted = false;
+            document.getElementById('overlay').classList.remove('hidden');
+            document.getElementById('overlay-title').innerText = "FAILED";
+            document.getElementById('overlay-title').style.color = "#ff3333";
+            document.getElementById('overlay-desc').innerHTML = `${reason}<br>CREDITS LOST: ${gameState.score}`;
+            document.getElementById('start-btn').innerText = "Restart Sector";
+            document.getElementById('start-btn').onclick = startGame; // Ensure standard start binding
+            document.getElementById('respawn-btn').style.display = 'block';
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            update(clock.getDelta());
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => { init(); animate(); };
+
+    </script>
+</body>
+</html>
