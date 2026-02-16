@@ -1,7 +1,5 @@
-Here’s a README template you can paste straight into your GitHub repo for your project at https://void-lab-x.vercel.app/
- — assuming it’s basically that WASD-controlled little game UI you’ve got live. I poked at the live site and it looks like a minimalist “infiltrate security sectors, collect credits, survive & reach exit” game screen — so this README is geared toward that vibe.
 
-VOID-LAB
+VOID-LAB-X
 
 A lightweight browser game prototype where you infiltrate security sectors, dodge hazards, collect credits, and make it to the exit using simple WASD controls.
 
