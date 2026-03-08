@@ -24,12 +24,10 @@ Checkpoint & Respawn: Restart from last checkpoint upon death.
 
 📦 Tech Stack
 
-(Fill in this part once you know exactly — this is a guess until you share your source code)
+Javascript,  HTML5 , CSS, React.Js,  Three.js 
 
 🧠 Game Logic: JavaScript
 
 🎨 Graphics: HTML5 Canvas / CSS
 
 📍 Deployment: Vercel
-
-🧪 Optional: Any frameworks/libraries you used (Phaser, React, Three.js, etc.)
